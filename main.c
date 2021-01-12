@@ -153,7 +153,8 @@ void main(void){
     ANSELbits.ANS4=0;
     TRISCbits.RC0=0;
     LED_OFF
-            
+    TMR2_StopTimer();
+    
     init_adc();
     init_cdc();
     init_usb();
@@ -161,8 +162,11 @@ void main(void){
     GIEL = 1;
     PEIE = 1;
     while (1){
-        if (i == 10000000) {
+        if (i == 50000000) {
             val=get_adc(10);
+            TMR2_StopTimer();
+            PORTCbits.RC5=0;
+            
             voltage=val*4;
             voltageh=voltage/1000;
             voltage=voltage-(voltageh*1000);
@@ -170,6 +174,9 @@ void main(void){
             if (voltageh<1 || voltageh==1 && voltage<=850) LED_OFF;
             printf("ADC: %u, voltage: %u.%uv\r\n\0", val, voltageh, voltage);              
             i = 0;       
+        }
+        if (i == 49000000){
+            TMR2_StartTimer();
         }
         i++;
         asm("nop");
