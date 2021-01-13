@@ -144,6 +144,14 @@ void valveClose(){
     
 }
 
+void printVoltage(uint16_t adc){
+    uint16_t voltage=adc*4/10;
+    uint16_t voltageh;
+    voltageh=voltage/100;
+    voltage=voltage-(voltageh*100);
+    printf("%u, %u.%uv\r\n\0", adc, voltageh, abs(voltage));    
+}
+
 void main(void){
     // Initialize the device
     SYSTEM_Initialize();
@@ -166,8 +174,7 @@ void main(void){
     uint32_t i=500000;
     uint16_t w=0;
     uint16_t val=0;
-    uint16_t voltage;
-    uint16_t voltageh;
+    uint16_t voltage=0;
     uint8_t watering_timeout=0;
     
     ANSELHbits.ANS10=1;
@@ -188,17 +195,14 @@ void main(void){
         if (mode==MODE_MONITORING){
             if (0==i % 600000) { // every 10 mins
                 val=get_adc(10);
-            
-                voltage=val*4;
-                if (voltageh>1900){
+                voltage=val*4/10;
+                if (voltage>192){
                     watering_timeout=0;
                     mode=MODE_WATERING;
                     valveOpen();
                     printf("WATERING MODE!\r\n\0");    
                 } else {
-                    voltageh=voltage/1000;
-                    voltage=voltage-(voltageh*1000);
-                    printf("%u, %u.%uv\r\n\0", val, voltageh, abs(voltage));              
+                    printVoltage(val);          
                     // Shutdown PWM
                     TMR2_StopTimer();
                     PORTCbits.RC5=0;
@@ -208,12 +212,13 @@ void main(void){
             i++;
         }
         if (mode==MODE_WATERING){
+            if (0==w % 2000) printVoltage(val);
             if (0==w % 500) LED_TOGGLE
             if (0==w % 10){
                 val=get_adc(10);
-                voltage=val*4;
+                voltage=val*4/10;
                
-                if (voltage<1840){
+                if (voltage<184){
                     LED_OFF
                     valveClose();
                     mode=MODE_MONITORING;
@@ -232,11 +237,12 @@ void main(void){
             valveClose(); // close valve
             TMR2_StopTimer(); // shutdown PWM
             PORTCbits.RC5=0; // set to 0
+            w=0;
             while(1){
-                LED_OFF // Flashing LED indicates error
-                __delay_ms(900);
-                LED_ON
-                __delay_ms(100);
+                if (0==(w+100) % 1000) LED_ON // Flashing LED indicates error
+                if (0==w % 1000) LED_OFF // Flashing LED indicates error
+                w++;
+                __delay_ms(1);
             }
         }
         __delay_ms(1);
