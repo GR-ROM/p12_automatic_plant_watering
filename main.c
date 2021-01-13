@@ -47,13 +47,25 @@
 #include <xc.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define LED_ON PORTCbits.RC0=1;
 #define LED_OFF PORTCbits.RC0=0;
+#define LED_TOGGLE PORTCbits.RC0=~PORTCbits.RC0;
 
 #define __XTAL_FREQ 48000000
 
 #define ADC_SET_CHANNEL(c) (ADCON0bits.CHS=c)
+
+#define WATERING_TIMEOUT 2000
+
+uint8_t mode;
+
+enum mode{
+    MODE_MONITORING=0,
+    MODE_WATERING,
+    MODE_ERROR,
+};
 
 void putch(unsigned char byte){
     send_cdc_buf(&byte, 1);
@@ -124,6 +136,14 @@ void start_adc(unsigned char ch){
     ADIE=1;
 }
 
+void valveOpen(){
+    
+}
+
+void valveClose(){
+    
+}
+
 void main(void){
     // Initialize the device
     SYSTEM_Initialize();
@@ -143,10 +163,12 @@ void main(void){
 
     // Disable the Peripheral Interrupts
     //INTERRUPT_PeripheralInterruptDisable();
-    uint32_t i=0;
+    uint32_t i=500000;
+    uint16_t w=0;
     uint16_t val=0;
     uint16_t voltage;
     uint16_t voltageh;
+    uint8_t watering_timeout=0;
     
     ANSELHbits.ANS10=1;
     TRISBbits.TRISB4=1;
@@ -154,6 +176,7 @@ void main(void){
     TRISCbits.RC0=0;
     LED_OFF
     TMR2_StopTimer();
+    mode=MODE_MONITORING;
     
     init_adc();
     init_cdc();
@@ -162,24 +185,61 @@ void main(void){
     GIEL = 1;
     PEIE = 1;
     while (1){
-        if (i == 50000000) {
-            val=get_adc(10);
-            TMR2_StopTimer();
-            PORTCbits.RC5=0;
+        if (mode==MODE_MONITORING){
+            if (0==i % 600000) { // every 10 mins
+                val=get_adc(10);
             
-            voltage=val*4;
-            voltageh=voltage/1000;
-            voltage=voltage-(voltageh*1000);
-            if (voltageh>1 || voltageh==1 && voltage>=900) LED_ON;
-            if (voltageh<1 || voltageh==1 && voltage<=850) LED_OFF;
-            printf("ADC: %u, voltage: %u.%uv\r\n\0", val, voltageh, voltage);              
-            i = 0;       
+                voltage=val*4;
+                if (voltageh>1900){
+                    watering_timeout=0;
+                    mode=MODE_WATERING;
+                    valveOpen();
+                    printf("WATERING MODE!\r\n\0");    
+                } else {
+                    voltageh=voltage/1000;
+                    voltage=voltage-(voltageh*1000);
+                    printf("%u, %u.%uv\r\n\0", val, voltageh, abs(voltage));              
+                    // Shutdown PWM
+                    TMR2_StopTimer();
+                    PORTCbits.RC5=0;
+                }
+            }   
+            if (0 == (i+20) % 600000) TMR2_StartTimer(); // start 50ms before measuring
+            i++;
         }
-        if (i == 49000000){
-            TMR2_StartTimer();
+        if (mode==MODE_WATERING){
+            if (0==w % 500) LED_TOGGLE
+            if (0==w % 10){
+                val=get_adc(10);
+                voltage=val*4;
+               
+                if (voltage<1840){
+                    LED_OFF
+                    valveClose();
+                    mode=MODE_MONITORING;
+                    i=600000;
+                    printf("MONITORING MODE!\r\n\0");
+                } else {
+                    if (++watering_timeout==WATERING_TIMEOUT){
+                        printf("Watering timed out!\r\n\0");   
+                        watering_timeout=0;
+                    }
+                }
+            }
+            w++;
         }
-        i++;
-        asm("nop");
+        if (mode==MODE_ERROR){
+            valveClose(); // close valve
+            TMR2_StopTimer(); // shutdown PWM
+            PORTCbits.RC5=0; // set to 0
+            while(1){
+                LED_OFF // Flashing LED indicates error
+                __delay_ms(900);
+                LED_ON
+                __delay_ms(100);
+            }
+        }
+        __delay_ms(1);
     }
 }
 /**
